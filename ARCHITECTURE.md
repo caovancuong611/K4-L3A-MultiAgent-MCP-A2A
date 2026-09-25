@@ -31,7 +31,14 @@ Mô tả message envelope, correlation theo `case_id`, điều kiện handoff, t
 
 ## 4. Evidence lifecycle
 
-Mô tả cách validate MCP response, lưu `evidence_ref`, map evidence vào claim/output và emit `tool_result_consumed`. Evidence không được tái sử dụng giữa các case.
+Toàn bộ MCP call đi qua `EvidenceGateway.call()` ([mcp_gateway.py](src/student_agent/mcp_gateway.py)):
+
+1. **Discovery, không đoán tên tool.** `list_tools()` cache danh sách tool thật từ gateway; `call()` chặn ngay ở phía client nếu `tool_name` không nằm trong danh sách đã discover, trước khi gửi request (audited) lên server.
+2. **Validate schema.** `Contracts.validate_evidence()` kiểm tra mọi response theo `mcp-evidence-response-v1.schema.json` trước khi trả về cho caller — response sai contract sẽ raise ngay, không lọt xuống specialist.
+3. **Lưu evidence_ref nguyên trạng.** `CaseEvidenceCollector` ([evidence.py](src/student_agent/evidence.py)) bọc gateway cho một `case_id` cố định (truyền vào constructor), chỉ đọc `evidence_ref`/`data`/`domain` từ response — không sửa, không tự sinh. Vì `case_id` được collector tự truyền cho mọi call, một specialist dùng collector không thể vô tình lấy evidence chéo case.
+4. **Cache theo (tool, arguments).** Gọi lại cùng tool + cùng tham số trong một case sẽ trả từ cache thay vì gọi lại gateway (giảm audited call trùng lặp).
+5. **Emit `tool_result_consumed` tại điểm fetch.** Mỗi lần fetch evidence mới, collector tự `trace.emit(...)` với `actor` là specialist gọi nó và `evidence_refs=[evidence_ref]`, đảm bảo mọi evidence đã "consume" đều có dấu vết observable.
+6. **Map evidence → claim/output là việc của tầng verifier (mục 5, chưa triển khai).** Fetch được evidence không đồng nghĩa được trích dẫn: `evidence_refs` trong `claim_assessments`/output cuối chỉ được đưa vào khi evidence đó thật sự hỗ trợ kết luận cụ thể đang đưa ra, không phải mọi record đã fetch trong quá trình điều tra.
 
 ## 5. Failure policy
 
